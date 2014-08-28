@@ -1,10 +1,12 @@
+import datetime
+
 TITLE  = 'Viasat Play'
 PREFIX = '/video/viasatplay'
 
 ART   = "art-default.jpg"
 THUMB = 'icon-default.png'
 
-MAX_SEARCH_ITEMS = 25
+MAX_SEARCH_ITEMS = 50
 
 CHANNELS = [ 
     {
@@ -30,25 +32,7 @@ CHANNELS = [
         'base_url': 'http://www.tv10play.se',
         'thumb':    R('viasat_tv10.png'),
         'desc':     unicode('På TV10 Play ser du alla TV10:s egna program och vissa av våra livesändningar och utländska serier. Vi har dessutom extramaterial till många av våra program. Mer information om våra program finns på TV10.se.')
-    },
-    {
-        'title':    'TV3 Play Norge',
-        'base_url': 'http://www.tv3play.no',
-        'thumb':    R('tv3_norway.png'),
-        'desc':     unicode('TV3 er en underholdningskanal for alle. Våre verdier er leken, nyskapende, oppløftende og engasjerende. Kanalens programtilbud består av innkjøpte serier, filmer og norske egenproduserte programmer i ulike kategorier.')
-    },
-    {
-        'title':    'Viasat 4 Play Norge',
-        'base_url': 'http://www.viasat4play.no',
-        'thumb':    R('viasat4_norway.png'),
-        'desc':     unicode('Viasat 4 er en norsk underholdnings- og sportskanal fra Modern Times Group (MTG). Kanalen startet sendinger 8. september 2007 i forbindelse med utbyggingen av det digitale bakkenettet.')
-    },	
-    {
-        'title':    'TV3 Play Danmark',
-        'base_url': 'http://www.tv3play.dk',
-        'thumb':    R('tv3_denmark.png'),
-        'desc':     unicode('På TV3 Play kan du se alle TV3’s egne programmer og nogen af vores udenlandske serier. Vi har også ekstramateriale til flere af vores programmer. Mer information om vores programmer findes på TV3.dk')
-    },
+    }
 ]
 
 ###################################################################################################
@@ -78,13 +62,11 @@ def MainMenu():
             )
         )
 
-    oc.add(
-        InputDirectoryObject(
-            key = Callback(Search),
-            title  = 'Search Program',
-            prompt = 'Search Program'
-        )
-    )
+    oc.add(InputDirectoryObject(key    = Callback(Search),
+                                title  = 'Search Program',
+                                prompt = 'Search Program'
+                                )
+           )
     
     return oc
 
@@ -104,6 +86,21 @@ def ChannelMenu(title, base_url, thumb):
                     id = 'latest_programs'
                 ), 
             title = "Latest programs", 
+            thumb = thumb
+        )
+    ) 
+
+    oc.add(
+        DirectoryObject(
+            key = 
+                Callback(
+                    Clips, 
+                    base_url = base_url, 
+                    videos_url = base_url + "/mobileapi/featured",
+                    title = "Latest clips",
+                    id    = 'latest_clips'
+                ), 
+            title = "Latest clips", 
             thumb = thumb
         )
     ) 
@@ -171,7 +168,10 @@ def Search(query, offset = 0):
             continue
         
         video = result['video']         
-        video.summary = result['channel_title'] + "\r\n\r\n" + video.summary
+        if video.summary:
+            video.summary = result['channel_title'] + "\r\n\r\n" + video.summary
+        else:
+            video.summary = result['channel_title']
         video.art = result['thumb']
                 
         oc.add(video)
@@ -208,18 +208,22 @@ def AllPrograms(title, base_url):
     
     for section in programsInfo['sections']:
         for program in section['formats']:
+            # Samsung causes troubles with empty Descriptions...
+            mySummary = None
+            if program['description'] != "":
+                mySummary = unicode(program['description'])
             oc.add(
                 DirectoryObject(
                     key = 
                         Callback(
                             Seasons,
                             title = unicode(program['title']),
-                            summary = unicode(program['description']) + " ", # NOTE: Samsung causes troubles with empty Descriptions...
+                            summary = mySummary,
                             base_url = base_url,
                             id = program['id']
                         ),
                     title = unicode(program['title']),
-                    summary = unicode(program['description']),
+                    summary = mySummary,
                     thumb = GetImageURL(program['image'])
                 )
              )
@@ -236,44 +240,40 @@ def Seasons(title, summary, base_url, id):
   
     seasonsInfo = JSON.ObjectFromURL(base_url + "/mobileapi/detailed?formatid=" + id)
     seasonImgUrl = GetImageURL(seasonsInfo['format']['image'])
-    
-    if len(seasonsInfo['formatcategories']) == 1:
-        return Episodes(
-                    title = unicode(seasonsInfo['formatcategories'][0]['name']),
-                    base_url = base_url,
-                    videos_url = seasonsInfo['formatcategories'][0]['videos_call'],
-                    id = 'video_program',
-                    art = seasonImgUrl
-        ) 
-    
-    else:
-        for season in seasonsInfo['formatcategories']:
-            seasonName = unicode(season['name']) 
-
+    for season in seasonsInfo['formatcategories']:
+        seasonName   = unicode(season['name'])
+        videos_url   = season['videos_call']
+        if len(seasonsInfo['formatcategories']) > 1:
             oc.add(
                 DirectoryObject(
                     key = 
-                        Callback(
-                            Episodes, 
-                            title      = seasonName,
-                            base_url   = base_url, 
-                            videos_url = season['videos_call'],
-                            id         = 'video_program',
-                            art        = seasonImgUrl
+                    Callback(Episodes, 
+                             title      = seasonName,
+                             base_url   = base_url, 
+                             videos_url = videos_url,
+                             id         = 'video_program',
+                             art        = seasonImgUrl
                         ), 
                     title   = seasonName, 
                     summary = summary, 
                     thumb   = GetImageURL(season['image']),
                     art     = seasonImgUrl
+                    )
                 )
-            ) 
+        else:
+            return Episodes(seasonName,
+                            base_url,
+                            videos_url,
+                            'video_program',
+                            seasonImgUrl)
 
     return oc
  
 ####################################################################################################
 @route(PREFIX + '/Episodes')
 def Episodes(title, base_url, videos_url, id = None, art = None):
-    oc = ObjectContainer(title2 = unicode(title))
+    oc        = ObjectContainer(title2 = unicode(title))
+    episodeOc = ObjectContainer(title2 = unicode(title))
 
     try:
         videosInfo = JSON.ObjectFromURL(videos_url)
@@ -285,31 +285,89 @@ def Episodes(title, base_url, videos_url, id = None, art = None):
     else:
         videos = videosInfo
     
+    if id == 'video_program' and len(videosInfo['video_clip']) > 0:
+        oc.add(DirectoryObject(
+                key = Callback(Clips,
+                               base_url   = base_url,
+                               videos_url = videos_url,
+                               title      = title,
+                               id         = 'video_clip',
+                               art        = art
+                               ), 
+                title = "Klipp", 
+                thumb = R(THUMB), 
+                art   = R(ART)
+                )
+               )
     if videos:
         for video in videos:
             try:
-                oc.add(
-                    EpisodeObject(
-                        url = base_url + '/play/' + video['id'],
-                        title = unicode(video['title'] + " - " + video['summary']),
-                        summary = unicode(video['description']),
-                        show = unicode(video['formattitle']),
-                        art = art,
-                        thumb = GetImageURL(video['image']),
-                        originally_available_at = Datetime.ParseDate(video['airdate'].split(" ")[0]).date(),
-                        duration = int(video['length']) * 1000,
-                        season = int(video['season']),
-                        index = int(video['episode'])
+                duration = int(video['length']) * 1000
+            except:
+                duration = None
+            try:
+                season = int(video['season'])
+            except:
+                season = None
+            summary = unicode(video['summary'].strip())
+            if not video['description'].strip() in summary:
+                summary = unicode(video['description'].strip()) + ". " + summary
+            if 'expiration' in video and video['expiration'] and len(video['expiration'])>0:
+                summary = AddAvailability(int(video['expiration']), summary)
+            episodeOc.add(
+                EpisodeObject(
+                    url = base_url + '/play/' + video['id'],
+                    title = unicode(video['title'] + " - " + video['summary']),
+                    summary = summary,
+                    show = unicode(video['formattitle']),
+                    art = art,
+                    thumb = GetImageURL(video['image']),
+                    originally_available_at = Datetime.ParseDate(video['airdate'].split(" ")[0]).date(),
+                    duration = duration,
+                    season = season,
+                    index = episode
                     )
                 )
-            except:
-                # If not all attributes, especially duration, are present
-                # for an episode, it won't play either, so we skip those.
-                continue
-            
-    if len(oc) < 1:
+
+        sortOnAirData(episodeOc)
+        for ep in episodeOc.objects:
+            oc.add(ep)
+    elif id == 'video_program' and (videosInfo['video_clip'] == None or len(videosInfo['video_clip']) < 1):
         return NoProgramsFound(oc)
 
+    return oc
+
+####################################################################################################
+@route(PREFIX + '/Clips')
+def Clips(base_url, videos_url, title, id, art=None):
+
+    oc = ObjectContainer(title2 = unicode(title))
+
+    videosInfo = JSON.ObjectFromURL(videos_url)
+
+    if id:
+        videos = videosInfo[id]
+    else:
+        videos = videosInfo
+    
+    for clip in videos:
+        try:
+            duration = int(clip['length']) * 1000
+        except:
+            duration = None
+        title = unicode(clip['title'])
+        oc.add(
+            VideoClipObject(
+                url = addSamsung(base_url + '/play/' + clip['id'], title),
+                title = title,
+                summary = unicode(clip['summary']),
+                thumb = GetImageURL(clip['image']),
+                art = art,
+                originally_available_at = datetime.date.fromtimestamp(int(clip['created'])),
+                duration = duration
+                )
+            )
+    sortOnAirData(oc)
     return oc
 
 ####################################################################################################
@@ -322,3 +380,16 @@ def NoProgramsFound(oc):
 ####################################################################################################
 def GetImageURL(url):
     return "http://play.pdl.viaplay.com/imagecache/497x280/" + url.replace('\\', '') 
+
+####################################################################################################
+def AddAvailability(expiration, summary):
+    availability = datetime.datetime.fromtimestamp(expiration)-datetime.datetime.now()
+    return unicode('Tillgänglig: %i dagar kvar. \n%s' % (availability.days, summary))
+
+####################################################################################################
+def sortOnAirData(Objects):
+    for obj in Objects.objects:
+        if obj.originally_available_at == None:
+            Log("JTDEBUG - air date missing for %s" % obj.title)
+            return Objects.objects.reverse()
+    return Objects.objects.sort(key=lambda obj: (obj.originally_available_at,obj.title))
