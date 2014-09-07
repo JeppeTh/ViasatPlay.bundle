@@ -1,4 +1,4 @@
-import datetime
+import datetime, re
 
 TITLE  = 'Viasat Play'
 PREFIX = '/video/viasatplay'
@@ -46,22 +46,37 @@ def Start():
 @handler(PREFIX, TITLE, thumb = THUMB, art = ART)
 def MainMenu():
     oc = ObjectContainer(title1 = TITLE)
-    for channel in CHANNELS:
-        oc.add(
-            DirectoryObject(
-                key = 
-                    Callback(
-                        ChannelMenu, 
-                        title = channel['title'], 
-                        base_url = channel['base_url'],
-                        thumb = channel['thumb']
-                    ), 
-                title = channel['title'], 
-                thumb = channel['thumb'], 
-                summary = channel['desc']
+    
+    oc.add(
+        DirectoryObject(
+            key   = Callback(LatestEpisodes, title = "Latest programs"),
+            title = "Latest programs",
+            thumb = R(THUMB)
+            )
+        )
+    oc.add(
+        DirectoryObject(
+            key   = Callback(LatestClips, title = "Latest clips"),
+            title = "Latest clips",
+            thumb = R(THUMB)
+            )
+        )
+    oc.add(
+        DirectoryObject(
+            key   = Callback(Recommended, title = "Recommended"),
+            title = "Recommended",
+            thumb = R(THUMB)
             )
         )
 
+    oc.add(
+        DirectoryObject(
+            key   = Callback(AllShows, title = "All Shows"),
+            title = "AllShows",
+            thumb = R(THUMB)
+            )
+        )
+    
     oc.add(InputDirectoryObject(key    = Callback(Search),
                                 title  = 'Search Program',
                                 prompt = 'Search Program'
@@ -71,68 +86,80 @@ def MainMenu():
     return oc
 
 ####################################################################################################
-@route(PREFIX + '/ChannelMenu')
-def ChannelMenu(title, base_url, thumb):
-    oc = ObjectContainer(title1 = TITLE)
-    
-    oc.add(
-        DirectoryObject(
-            key = 
-                Callback(
-                    Episodes, 
-                    title = "Latest programs",
-                    base_url = base_url, 
-                    videos_url = base_url + "/mobileapi/featured",
-                    id = 'latest_programs'
-                ), 
-            title = "Latest programs", 
-            thumb = thumb
-        )
-    ) 
+@route(PREFIX + '/latestepisodes')
+def LatestEpisodes(title):
+    oc   = ObjectContainer(title2 = unicode(title))
 
-    oc.add(
-        DirectoryObject(
-            key = 
-                Callback(
-                    Clips, 
-                    base_url = base_url, 
-                    videos_url = base_url + "/mobileapi/featured",
-                    title = "Latest clips",
-                    id    = 'latest_clips'
-                ), 
-            title = "Latest clips", 
-            thumb = thumb
-        )
-    ) 
+    for channel in CHANNELS:
+        oc = Episodes(oc, title, channel['base_url'], channel['base_url'] + "/mobileapi/featured", 'latest_programs', channel['thumb'])
 
-    oc.add(
-        DirectoryObject(
-            key = 
-                Callback(
-                    Episodes, 
-                    title = "Recommended",
-                    base_url = base_url, 
-                    videos_url = base_url + "/mobileapi/featured",
-                    id = 'recommended'
-                ), 
-            title = "Recommended", 
-            thumb = thumb
-        )
-    )  
+    oc.objects.sort(key=lambda obj: (obj.originally_available_at,obj.title), reverse=True)
+
+    return oc
+
+####################################################################################################
+@route(PREFIX + '/latestclips')
+def LatestClips(title):
+    oc   = ObjectContainer(title2 = unicode(title))
+
+    for channel in CHANNELS:
+        oc = Clips(oc, channel['base_url'], channel['base_url'] + "/mobileapi/featured", title, 'latest_clips', channel['thumb'])
+
+    oc.objects.sort(key=lambda obj: (obj.originally_available_at,obj.title), reverse=True)
+
+    return oc
+
+####################################################################################################
+@route(PREFIX + '/recommended')
+def Recommended(title):
+    oc   = ObjectContainer(title2 = unicode(title))
+
+    for channel in CHANNELS:
+        oc = Episodes(oc, title, channel['base_url'], channel['base_url'] + "/mobileapi/featured", 'recommended', channel['thumb'])
+
+    return oc
+
+####################################################################################################
+@route(PREFIX + '/allshows')
+def AllShows(title):
+
+    oc   = ObjectContainer(title2 = unicode(title))
+
+    for channel in CHANNELS:
+        oc = AddShows(oc, channel)
+
+    oc.objects.sort(key = lambda obj: obj.title)
+    return oc
+
+####################################################################################################
+def AddShows(oc, channel):
+    programsInfo = JSON.ObjectFromURL(channel['base_url'] + "/mobileapi/format")
     
-    oc.add(
-        DirectoryObject(
-            key = 
-                Callback(
-                    AllPrograms, 
-                    title = title, 
-                    base_url = base_url
-                ), 
-            title = "All programs", 
-            thumb = thumb
-        )
-    )
-    
+    for section in programsInfo['sections']:
+        for program in section['formats']:
+            # Samsung causes troubles with empty Descriptions...
+            mySummary = None
+            if program['description'] != "":
+                mySummary = unicode(program['description'])
+            oc.add(
+                TVShowObject(
+                    key = 
+                        Callback(
+                            Seasons,
+                            title = unicode(program['title']),
+                            summary = mySummary,
+                            base_url = channel['base_url'],
+                            id = program['id']
+                        ),
+                    rating_key = program['id'],
+                    title = unicode(program['title']),
+                    source_title = channel['title'],
+                    summary = mySummary,
+                    thumb = GetImageURL(program['image']),
+                    art = channel['thumb']
+                )
+             )
+  
     return oc
 
 ####################################################################################################
@@ -143,22 +170,21 @@ def Search(query, offset = 0):
     results = []
     counter = 0
 
-    for channel in CHANNELS:
-        videos = AllPrograms(channel['title'], channel['base_url']).objects
-        
-        for video in videos:                
-            # In case of single character - only compare initial character.
-            if len(query) > 1 and query.lower() in video.title.lower() or \
-               len(query) == 1 and query.lower() == video.title[0].lower():
+    videos = AllShows("Searching").objects
+
+    for video in videos:                
+        # In case of single character - only compare initial character.
+        if len(query) > 1 and query.lower() in video.title.lower() or \
+                len(query) == 1 and query.lower() == video.title[0].lower():
                     
-                results.append(
-                    {
-                        'video': video, 
-                        'title': video.title, 
-                        'channel_title': channel['title'], 
-                        'thumb': channel['thumb']
-                    }
-                )
+            results.append(
+                {
+                    'video': video, 
+                    'title': video.title, 
+                    'channel_title': video.source_title, 
+                    'thumb': video.art
+                }
+            )
     
     results = sorted(results, key = lambda result: result['title'])           
     for result in results:
@@ -167,11 +193,7 @@ def Search(query, offset = 0):
         if counter <= offset:
             continue
         
-        video = result['video']         
-        if video.summary:
-            video.summary = result['channel_title'] + "\r\n\r\n" + video.summary
-        else:
-            video.summary = result['channel_title']
+        video     = result['video']
         video.art = result['thumb']
                 
         oc.add(video)
@@ -190,7 +212,6 @@ def Search(query, offset = 0):
                     title = "Next..."
                 )
             )
-                    
             return oc
 
     if len(oc) == 0:
@@ -198,37 +219,6 @@ def Search(query, offset = 0):
     else:
         oc.objects.sort(key = lambda obj: obj.title)
         return oc
-
-
-####################################################################################################
-@route(PREFIX + '/AllPrograms')
-def AllPrograms(title, base_url):
-    oc = ObjectContainer(title2 = title)
-    programsInfo = JSON.ObjectFromURL(base_url + "/mobileapi/format")
-    
-    for section in programsInfo['sections']:
-        for program in section['formats']:
-            # Samsung causes troubles with empty Descriptions...
-            mySummary = None
-            if program['description'] != "":
-                mySummary = unicode(program['description'])
-            oc.add(
-                DirectoryObject(
-                    key = 
-                        Callback(
-                            Seasons,
-                            title = unicode(program['title']),
-                            summary = mySummary,
-                            base_url = base_url,
-                            id = program['id']
-                        ),
-                    title = unicode(program['title']),
-                    summary = mySummary,
-                    thumb = GetImageURL(program['image'])
-                )
-             )
-  
-    return oc
 
 ####################################################################################################
 @route(PREFIX + '/Seasons')
@@ -248,6 +238,7 @@ def Seasons(title, summary, base_url, id):
                 DirectoryObject(
                     key = 
                     Callback(Episodes, 
+                             oc         = None,
                              title      = seasonName,
                              base_url   = base_url, 
                              videos_url = videos_url,
@@ -261,7 +252,8 @@ def Seasons(title, summary, base_url, id):
                     )
                 )
         else:
-            return Episodes(seasonName,
+            return Episodes(None,
+                            seasonName,
                             base_url,
                             videos_url,
                             'video_program',
@@ -271,8 +263,10 @@ def Seasons(title, summary, base_url, id):
  
 ####################################################################################################
 @route(PREFIX + '/Episodes')
-def Episodes(title, base_url, videos_url, id = None, art = None):
-    oc        = ObjectContainer(title2 = unicode(title))
+def Episodes(oc, title, base_url, videos_url, id = None, art = None):
+    orgOc = oc
+    if not oc:
+        oc = ObjectContainer(title2 = unicode(title))
     episodeOc = ObjectContainer(title2 = unicode(title))
 
     try:
@@ -288,6 +282,7 @@ def Episodes(title, base_url, videos_url, id = None, art = None):
     if id == 'video_program' and len(videosInfo['video_clip']) > 0:
         oc.add(DirectoryObject(
                 key = Callback(Clips,
+                               oc         = None,
                                base_url   = base_url,
                                videos_url = videos_url,
                                title      = title,
@@ -295,8 +290,8 @@ def Episodes(title, base_url, videos_url, id = None, art = None):
                                art        = art
                                ), 
                 title = "Klipp", 
-                thumb = R(THUMB), 
-                art   = R(ART)
+                thumb = GetChannelThumb(base_url), 
+                art   = art
                 )
                )
     if videos:
@@ -309,7 +304,12 @@ def Episodes(title, base_url, videos_url, id = None, art = None):
                 season = int(video['season'])
             except:
                 season = None
+            show = unicode(video['formattitle'])
             summary = unicode(video['summary'].strip())
+            title = unicode(video['title'] + " - " + summary)
+            if not orgOc and show in title:
+                title = re.sub(show+"[ 	-:,]*(S[0-9]+E[0-9]+)*[ 	-:,]*(.+)", "\\2", title)
+            episode = int(video['episode'])
             if not video['description'].strip() in summary:
                 summary = unicode(video['description'].strip()) + ". " + summary
             if 'expiration' in video and video['expiration'] and len(video['expiration'])>0:
@@ -317,9 +317,9 @@ def Episodes(title, base_url, videos_url, id = None, art = None):
             episodeOc.add(
                 EpisodeObject(
                     url = base_url + '/play/' + video['id'],
-                    title = unicode(video['title'] + " - " + video['summary']),
+                    title = title,
                     summary = summary,
-                    show = unicode(video['formattitle']),
+                    show = show,
                     art = art,
                     thumb = GetImageURL(video['image']),
                     originally_available_at = Datetime.ParseDate(video['airdate'].split(" ")[0]).date(),
@@ -329,7 +329,8 @@ def Episodes(title, base_url, videos_url, id = None, art = None):
                     )
                 )
 
-        sortOnAirData(episodeOc)
+        if id == 'video_program':
+            sortOnAirData(episodeOc)
         for ep in episodeOc.objects:
             oc.add(ep)
     elif id == 'video_program' and (videosInfo['video_clip'] == None or len(videosInfo['video_clip']) < 1):
@@ -339,9 +340,11 @@ def Episodes(title, base_url, videos_url, id = None, art = None):
 
 ####################################################################################################
 @route(PREFIX + '/Clips')
-def Clips(base_url, videos_url, title, id, art=None):
+def Clips(oc, base_url, videos_url, title, id, art=None):
 
-    oc = ObjectContainer(title2 = unicode(title))
+    orgOc = oc
+    if not oc:
+        oc = ObjectContainer(title2 = unicode(title))
 
     videosInfo = JSON.ObjectFromURL(videos_url)
 
@@ -356,6 +359,9 @@ def Clips(base_url, videos_url, title, id, art=None):
         except:
             duration = None
         title = unicode(clip['title'])
+        show = unicode(clip['formattitle'])
+        if not orgOc and show in title:
+            title = re.sub(show+"[ 	-:,]*(S[0-9]+E[0-9]+)*[ 	-:,]*(.+)", "\\2", title)
         oc.add(
             VideoClipObject(
                 url = addSamsung(base_url + '/play/' + clip['id'], title),
@@ -363,7 +369,7 @@ def Clips(base_url, videos_url, title, id, art=None):
                 summary = unicode(clip['summary']),
                 thumb = GetImageURL(clip['image']),
                 art = art,
-                originally_available_at = datetime.date.fromtimestamp(int(clip['created'])),
+                originally_available_at = Datetime.FromTimestamp(int(clip['created'])),
                 duration = duration
                 )
             )
@@ -382,8 +388,15 @@ def GetImageURL(url):
     return "http://play.pdl.viaplay.com/imagecache/497x280/" + url.replace('\\', '') 
 
 ####################################################################################################
+def GetChannelThumb(url):
+    for channel in CHANNELS:
+        if channel['base_url'] in url:
+            return channel['thumb']
+    return R(THUMB)
+
+####################################################################################################
 def AddAvailability(expiration, summary):
-    availability = datetime.datetime.fromtimestamp(expiration)-datetime.datetime.now()
+    availability = Datetime.FromTimestamp(expiration)-datetime.datetime.now()
     return unicode('Tillgänglig: %i dagar kvar. \n%s' % (availability.days, summary))
 
 ####################################################################################################
