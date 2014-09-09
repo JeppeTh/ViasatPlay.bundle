@@ -72,7 +72,7 @@ def MainMenu():
     oc.add(
         DirectoryObject(
             key   = Callback(AllShows, title = "All Shows"),
-            title = "AllShows",
+            title = "All Shows",
             thumb = R(THUMB)
             )
         )
