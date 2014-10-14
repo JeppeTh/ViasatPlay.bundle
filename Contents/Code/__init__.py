@@ -308,7 +308,7 @@ def Episodes(oc, title, base_url, videos_url, id = None, art = None):
             summary = unicode(video['summary'].strip())
             title = unicode(video['title'] + " - " + summary)
             if not orgOc and show in title:
-                title = re.sub(show+"[ 	-:,]*(S[0-9]+E[0-9]+)*[ 	-:,]*(.+)", "\\2", title)
+                title = re.sub(show+"[ 	-,]*(:[ 	-,]*)*(S[0-9]+E[0-9]+)*[ 	-:,]*(.+)", "\\3", title)
             episode = int(video['episode'])
             if not video['description'].strip() in summary:
                 summary = unicode(video['description'].strip()) + ". " + summary
